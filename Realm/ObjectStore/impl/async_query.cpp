@@ -43,23 +43,32 @@ AsyncQuery::~AsyncQuery()
     m_realm = nullptr;
 }
 
+size_t AsyncQuery::next_token()
+{
+    size_t token = 0;
+    for (auto& callback : m_callbacks) {
+        if (token <= callback.token) {
+            token = callback.token + 1;
+        }
+    }
+    return token;
+}
+
 size_t AsyncQuery::add_callback(std::function<void (std::exception_ptr)> callback)
+{
+    return add_callback({}, [=](std::vector<AsyncQueryChange>, std::exception_ptr error) {
+        callback(error);
+    });
+}
+
+size_t AsyncQuery::add_callback(std::vector<std::vector<size_t>> columns_to_watch,
+                                std::function<void (std::vector<AsyncQueryChange>, std::exception_ptr)> callback)
 {
     m_realm->verify_thread();
 
-    auto next_token = [=] {
-        size_t token = 0;
-        for (auto& callback : m_callbacks) {
-            if (token <= callback.token) {
-                token = callback.token + 1;
-            }
-        }
-        return token;
-    };
-
     std::lock_guard<std::mutex> lock(m_callback_mutex);
     auto token = next_token();
-    m_callbacks.push_back({std::move(callback), token, -1ULL});
+    m_callbacks.push_back({std::move(callback), token, -1ULL, std::move(columns_to_watch)});
     if (m_callback_index == npos) { // Don't need to wake up if we're already sending notifications
         Realm::Internal::get_coordinator(*m_realm).send_commit_notifications();
         m_have_callbacks = true;
@@ -141,7 +150,155 @@ bool AsyncQuery::is_alive() const noexcept
 // destroyed while the background work is running, and to allow removing
 // callbacks from any thread.
 
-void AsyncQuery::run()
+static bool map_moves(size_t& idx, ChangeInfo const& changes)
+{
+    auto it = changes.moves.find(idx);
+    if (it != changes.moves.end()) {
+        idx = it->second;
+        return true;
+    }
+    return false;
+}
+
+static bool row_did_change(Table& table, size_t idx, std::vector<ChangeInfo> const& modified, int depth = 0)
+{
+    if (depth > 16)  // arbitrary limit
+        return false;
+
+    size_t table_ndx = table.get_index_in_group();
+    if (table_ndx < modified.size()) {
+        auto const& changes = modified[table_ndx];
+        map_moves(idx, changes);
+        if (changes.changed.count(idx))
+            return true;
+    }
+
+    for (size_t i = 0, count = table.get_column_count(); i < count; ++i) {
+        auto type = table.get_column_type(i);
+        if (type == type_Link) {
+            auto& target = *table.get_link_target(i);
+            auto dst = table.get_link(i, idx);
+            return row_did_change(target, dst, modified, depth + 1);
+        }
+        if (type != type_LinkList)
+            continue;
+
+        auto& target = *table.get_link_target(i);
+        auto lvr = table.get_linklist(i, idx);
+        for (size_t j = 0; j < lvr->size(); ++j) {
+            size_t dst = lvr->get(j).get_index();
+            if (row_did_change(target, dst, modified, depth + 1))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+std::vector<AsyncQueryChange> AsyncQuery::calculate_changes(size_t table_ndx,
+                                                            std::vector<ChangeInfo> const& modified_rows)
+{
+    auto changes = table_ndx < modified_rows.size() ? &modified_rows[table_ndx] : nullptr;
+
+    struct RowInfo {
+        size_t shifted_row_index;
+        size_t prev_tv_index;
+        size_t tv_index;
+    };
+
+    auto do_calculate_changes = [&](auto& old_rows, auto& new_rows) {
+        std::vector<size_t> insertion_positions;
+        std::vector<size_t> deletion_positions;
+
+        std::vector<AsyncQueryChange> changeset;
+        size_t i = 0, j = 0;
+        while (i < old_rows.size() && j < new_rows.size()) {
+            auto old_index = old_rows[i];
+            auto new_index = new_rows[j];
+            if (old_index.shifted_row_index == new_index.shifted_row_index) {
+                new_rows[j].prev_tv_index = old_rows[i].tv_index;
+                ++i;
+                ++j;
+            }
+            else if (old_index.shifted_row_index < new_index.shifted_row_index) {
+                changeset.push_back({old_index.tv_index, -1ULL});
+                deletion_positions.push_back(old_index.tv_index);
+                ++i;
+            }
+            else {
+                changeset.push_back({-1ULL, new_index.tv_index});
+                insertion_positions.push_back(new_index.tv_index);
+                ++j;
+            }
+        }
+
+        for (; i < old_rows.size(); ++i) {
+            changeset.push_back({old_rows[i].tv_index, -1ULL});
+            deletion_positions.push_back(old_rows[j].tv_index);
+        }
+        for (; j < new_rows.size(); ++j) {
+            changeset.push_back({-1ULL, new_rows[j].tv_index});
+            insertion_positions.push_back(new_rows[j].tv_index);
+        }
+
+        // moves not implemented for sort
+        if (m_sort)
+            return changeset;
+
+        std::sort(begin(insertion_positions), end(insertion_positions));
+        std::sort(begin(deletion_positions), end(deletion_positions));
+        std::sort(begin(new_rows), end(new_rows), [](auto& lft, auto& rgt) {
+            return lft.tv_index < rgt.tv_index;
+        });
+
+        size_t ins = 0, del = 0;
+        int shift = 0;
+        for (auto& row : new_rows) {
+            while (del < deletion_positions.size() && deletion_positions[del] <= row.tv_index) {
+                ++del;
+                ++shift;
+            }
+            while (ins < insertion_positions.size() && insertion_positions[ins] <= row.tv_index) {
+                ++ins;
+                --shift;
+            }
+            if (row.prev_tv_index == -1ULL)
+                continue;
+
+            if (row_did_change(*m_query->get_table(), row.shifted_row_index, modified_rows))
+                changeset.push_back({row.tv_index, row.tv_index}); // FIXME: not i, j because scheme is dumb
+            if (row.tv_index + shift != row.prev_tv_index) {
+                --shift;
+                changeset.push_back({row.prev_tv_index, row.tv_index});
+            }
+        }
+
+        return changeset;
+    };
+
+    std::vector<RowInfo> old_rows;
+    for (size_t i = 0; i < m_previous_rows.size(); ++i) {
+        auto ndx = m_previous_rows[i];
+        old_rows.push_back({ndx, -1ULL, i});
+    }
+    std::stable_sort(begin(old_rows), end(old_rows), [](auto& lft, auto& rgt) {
+        return lft.shifted_row_index < rgt.shifted_row_index;
+    });
+
+    std::vector<RowInfo> new_rows;
+    for (size_t i = 0; i < m_tv.size(); ++i) {
+        auto ndx = m_tv[i].get_index();
+        if (changes)
+            map_moves(ndx, *changes);
+        new_rows.push_back({ndx, -1ULL, i});
+    }
+    std::stable_sort(begin(new_rows), end(new_rows), [](auto& lft, auto& rgt) {
+        return lft.shifted_row_index < rgt.shifted_row_index;
+    });
+    return do_calculate_changes(old_rows, new_rows);
+}
+
+void AsyncQuery::run(std::vector<ChangeInfo> const& modified_rows)
 {
     REALM_ASSERT(m_sg);
 
@@ -155,19 +312,34 @@ void AsyncQuery::run()
 
     REALM_ASSERT(!m_tv.is_attached());
 
+    size_t table_ndx = m_query->get_table()->get_index_in_group();
+
     // If we've run previously, check if we need to rerun
-    if (m_initial_run_complete) {
-        // Make an empty tableview from the query to get the table version, since
-        // Query doesn't expose it
-        if (m_query->find_all(0, 0, 0).outside_version() == m_handed_over_table_version) {
-            return;
-        }
-    }
+//    if (m_initial_run_complete) {
+//        if (table_ndx > modified_rows.size())
+//            return;
+//        auto const& changes = modified_rows[table_ndx];
+//        if (changes.changed.empty() && changes.moves.empty())
+//            return;
+//    }
 
     m_tv = m_query->find_all();
     if (m_sort) {
         m_tv.sort(m_sort.columnIndices, m_sort.ascending);
     }
+
+    if (m_initial_run_complete) {
+        m_new_changes = calculate_changes(table_ndx, modified_rows);
+        if (m_new_changes.empty()) {
+            m_tv = TableView();
+            return;
+        }
+    }
+
+    m_previous_rows.clear();
+    m_previous_rows.resize(m_tv.size());
+    for (size_t i = 0; i < m_tv.size(); ++i)
+        m_previous_rows[i] = m_tv[i].get_index();
 }
 
 void AsyncQuery::prepare_handover()
@@ -183,6 +355,10 @@ void AsyncQuery::prepare_handover()
     m_initial_run_complete = true;
     m_handed_over_table_version = m_tv.outside_version();
     m_tv_handover = m_sg->export_for_handover(m_tv, MutableSourcePayload::Move);
+
+    // FIXME: this is not actually correct
+    m_changes.insert(m_changes.end(), m_new_changes.begin(), m_new_changes.end());
+    m_new_changes.clear();
 
     // detach the TableView as we won't need it again and keeping it around
     // makes advance_read() much more expensive
@@ -243,7 +419,7 @@ void AsyncQuery::call_callbacks()
     REALM_ASSERT(is_for_current_thread());
 
     while (auto fn = next_callback()) {
-        fn(m_error);
+        fn(m_changes, m_error);
     }
 
     if (m_error) {
@@ -252,9 +428,10 @@ void AsyncQuery::call_callbacks()
         std::lock_guard<std::mutex> callback_lock(m_callback_mutex);
         m_callbacks.clear();
     }
+    m_changes.clear();
 }
 
-std::function<void (std::exception_ptr)> AsyncQuery::next_callback()
+std::function<void (std::vector<AsyncQueryChange>, std::exception_ptr)> AsyncQuery::next_callback()
 {
     std::lock_guard<std::mutex> callback_lock(m_callback_mutex);
     for (++m_callback_index; m_callback_index < m_callbacks.size(); ++m_callback_index) {
