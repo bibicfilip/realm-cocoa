@@ -21,8 +21,8 @@
 #include "impl/async_query.hpp"
 #include "impl/cached_realm.hpp"
 #include "impl/external_commit_helper.hpp"
+#include "impl/list_notification_helper.hpp"
 #include "object_store.hpp"
-#include "schema.hpp"
 #include "transact_log_handler.hpp"
 
 #include <realm/commit_log.hpp>
@@ -39,199 +39,6 @@
 
 using namespace realm;
 using namespace realm::_impl;
-
-namespace {
-// A transaction log handler that just validates that all operations made are
-// ones supported by the object store
-class TransactLogValidator {
-    // Index of currently selected table
-    size_t m_current_table = 0;
-
-    // Tables which were created during the transaction being processed, which
-    // can have columns inserted without a schema version bump
-    std::vector<size_t> m_new_tables;
-
-    REALM_NORETURN
-    REALM_NOINLINE
-    void schema_error()
-    {
-        throw std::runtime_error("Schema mismatch detected: another process has modified the Realm file's schema in an incompatible way");
-    }
-
-    // Throw an exception if the currently modified table already existed before
-    // the current set of modifications
-    bool schema_error_unless_new_table()
-    {
-        if (std::find(begin(m_new_tables), end(m_new_tables), m_current_table) == end(m_new_tables)) {
-            schema_error();
-        }
-        return true;
-    }
-
-protected:
-    size_t current_table() const noexcept { return m_current_table; }
-
-public:
-    // Schema changes which don't involve a change in the schema version are
-    // allowed
-    bool add_search_index(size_t) { return true; }
-    bool remove_search_index(size_t) { return true; }
-
-    // Creating entirely new tables without a schema version bump is allowed, so
-    // we need to track if new columns are being added to a new table or an
-    // existing one
-    bool insert_group_level_table(size_t table_ndx, size_t, StringData)
-    {
-        // Shift any previously added tables after the new one
-        for (auto& table : m_new_tables) {
-            if (table >= table_ndx)
-                ++table;
-        }
-        m_new_tables.push_back(table_ndx);
-        return true;
-    }
-    bool insert_column(size_t, DataType, StringData, bool) { return schema_error_unless_new_table(); }
-    bool insert_link_column(size_t, DataType, StringData, size_t, size_t) { return schema_error_unless_new_table(); }
-    bool add_primary_key(size_t) { return schema_error_unless_new_table(); }
-    bool set_link_type(size_t, LinkType) { return schema_error_unless_new_table(); }
-
-    // Removing or renaming things while a Realm is open is never supported
-    bool erase_group_level_table(size_t, size_t) { schema_error(); }
-    bool rename_group_level_table(size_t, StringData) { schema_error(); }
-    bool erase_column(size_t) { schema_error(); }
-    bool erase_link_column(size_t, size_t, size_t) { schema_error(); }
-    bool rename_column(size_t, StringData) { schema_error(); }
-    bool remove_primary_key() { schema_error(); }
-    bool move_column(size_t, size_t) { schema_error(); }
-    bool move_group_level_table(size_t, size_t) { schema_error(); }
-
-    bool select_descriptor(int levels, const size_t*)
-    {
-        // subtables not supported
-        return levels == 0;
-    }
-
-    bool select_table(size_t group_level_ndx, int, const size_t*) noexcept
-    {
-        m_current_table = group_level_ndx;
-        return true;
-    }
-
-    bool select_link_list(size_t, size_t, size_t) { return true; }
-
-    // Non-schema changes are all allowed
-    void parse_complete() { }
-    bool insert_empty_rows(size_t, size_t, size_t, bool) { return true; }
-    bool erase_rows(size_t, size_t, size_t, bool) { return true; }
-    bool swap_rows(size_t, size_t) { return true; }
-    bool clear_table() noexcept { return true; }
-    bool link_list_set(size_t, size_t) { return true; }
-    bool link_list_insert(size_t, size_t) { return true; }
-    bool link_list_erase(size_t) { return true; }
-    bool link_list_nullify(size_t) { return true; }
-    bool link_list_clear(size_t) { return true; }
-    bool link_list_move(size_t, size_t) { return true; }
-    bool link_list_swap(size_t, size_t) { return true; }
-    bool set_int(size_t, size_t, int_fast64_t) { return true; }
-    bool set_bool(size_t, size_t, bool) { return true; }
-    bool set_float(size_t, size_t, float) { return true; }
-    bool set_double(size_t, size_t, double) { return true; }
-    bool set_string(size_t, size_t, StringData) { return true; }
-    bool set_binary(size_t, size_t, BinaryData) { return true; }
-    bool set_date_time(size_t, size_t, DateTime) { return true; }
-    bool set_table(size_t, size_t) { return true; }
-    bool set_mixed(size_t, size_t, const Mixed&) { return true; }
-    bool set_link(size_t, size_t, size_t, size_t) { return true; }
-    bool set_null(size_t, size_t) { return true; }
-    bool nullify_link(size_t, size_t, size_t) { return true; }
-    bool insert_substring(size_t, size_t, size_t, StringData) { return true; }
-    bool erase_substring(size_t, size_t, size_t, size_t) { return true; }
-    bool optimize_table() { return true; }
-    bool set_int_unique(size_t, size_t, int_fast64_t) { return true; }
-    bool set_string_unique(size_t, size_t, StringData) { return true; }
-};
-
-// Extends TransactLogValidator to also track changes and report it to the
-// binding context if any properties are being observed
-class TransactLogObserver : public TransactLogValidator {
-    ChangeInfo& get_change(size_t i)
-    {
-        if (m_changes.size() <= i) {
-            m_changes.resize(std::max(m_changes.size() * 2, i + 1));
-        }
-        return m_changes[i];
-    }
-
-    bool mark_dirty(size_t row, __unused size_t col)
-    {
-        auto& table = get_change(current_table());
-        auto it = table.moves.find(row);
-        if (it != end(table.moves)) {
-            row = it->second;
-        }
-        table.changed.insert(row);
-
-        return true;
-    }
-
-public:
-    std::vector<ChangeInfo> m_changes;
-
-    void parse_complete()
-    {
-    }
-
-    bool insert_group_level_table(size_t, size_t, StringData)
-    {
-        return false;
-    }
-
-    bool insert_empty_rows(size_t, size_t, size_t, bool)
-    {
-        // rows are only inserted at the end, so no need to do anything
-        return true;
-    }
-
-    bool erase_rows(size_t row_ndx, size_t, size_t prior_num_rows, bool unordered)
-    {
-        REALM_ASSERT(unordered);
-
-        auto& table = get_change(current_table());
-        auto last_row_ndx = prior_num_rows - 1;
-        auto it = table.moves.find(last_row_ndx);
-        if (it != end(table.moves)) {
-            last_row_ndx = it->second;
-        }
-        table.moves[row_ndx] = last_row_ndx;
-        ++table.deletions;
-
-        return true;
-    }
-
-    bool clear_table()
-    {
-        return true;
-    }
-
-    // Things that just mark the field as modified
-    bool set_int(size_t col, size_t row, int_fast64_t) { return mark_dirty(row, col); }
-    bool set_bool(size_t col, size_t row, bool) { return mark_dirty(row, col); }
-    bool set_float(size_t col, size_t row, float) { return mark_dirty(row, col); }
-    bool set_double(size_t col, size_t row, double) { return mark_dirty(row, col); }
-    bool set_string(size_t col, size_t row, StringData) { return mark_dirty(row, col); }
-    bool set_binary(size_t col, size_t row, BinaryData) { return mark_dirty(row, col); }
-    bool set_date_time(size_t col, size_t row, DateTime) { return mark_dirty(row, col); }
-    bool set_table(size_t col, size_t row) { return mark_dirty(row, col); }
-    bool set_mixed(size_t col, size_t row, const Mixed&) { return mark_dirty(row, col); }
-    bool set_link(size_t col, size_t row, size_t, size_t) { return mark_dirty(row, col); }
-    bool set_null(size_t col, size_t row) { return mark_dirty(row, col); }
-    bool nullify_link(size_t col, size_t row, size_t) { return mark_dirty(row, col); }
-    bool insert_substring(size_t col, size_t row, size_t, StringData) { return mark_dirty(row, col); }
-    bool erase_substring(size_t col, size_t row, size_t, size_t) { return mark_dirty(row, col); }
-    bool set_int_unique(size_t col, size_t row, int_fast64_t) { return mark_dirty(row, col); }
-    bool set_string_unique(size_t col, size_t row, StringData) { return mark_dirty(row, col); }
-};
-} // anonymous namespace
 
 static std::mutex s_coordinator_mutex;
 static std::unordered_map<std::string, std::weak_ptr<RealmCoordinator>> s_coordinators_per_path;
@@ -307,7 +114,7 @@ std::shared_ptr<Realm> RealmCoordinator::get_realm(Realm::Config config)
         }
     }
 
-    auto realm = std::make_shared<Realm>(std::move(config));
+    auto realm = std::make_shared<Realm>(config);
     realm->init(shared_from_this());
     m_cached_realms.emplace_back(realm, m_config.cache);
     return realm;
@@ -321,13 +128,6 @@ std::shared_ptr<Realm> RealmCoordinator::get_realm()
 const Schema* RealmCoordinator::get_schema() const noexcept
 {
     return m_cached_realms.empty() ? nullptr : m_config.schema.get();
-}
-
-void RealmCoordinator::update_schema(Schema const& schema)
-{
-    // FIXME: this should probably be doing some sort of validation and
-    // notifying all Realm instances of the new schema in some way
-    m_config.schema = std::make_unique<Schema>(schema);
 }
 
 RealmCoordinator::RealmCoordinator() = default;
@@ -433,7 +233,7 @@ void RealmCoordinator::pin_version(uint_fast64_t version, uint_fast32_t index)
     }
 }
 
-void RealmCoordinator::register_query(std::shared_ptr<AsyncQuery> query)
+void RealmCoordinator::register_query(std::shared_ptr<CallbackCollection> query)
 {
     auto version = query->version();
     auto& self = Realm::Internal::get_coordinator(query->get_realm());
@@ -454,7 +254,7 @@ void RealmCoordinator::clean_up_dead_queries()
 
             // Ensure the query is destroyed here even if there's lingering refs
             // to the async query elsewhere
-            container[i]->release_query();
+            container[i]->release_data();
 
             if (container.size() > i + 1)
                 container[i] = std::move(container.back());
@@ -509,8 +309,7 @@ void RealmCoordinator::run_async_queries()
         return;
     }
 
-    TransactLogObserver obs;
-    advance_helper_shared_group_to_latest(obs);
+    advance_helper_shared_group_to_latest();
 
     // Make a copy of the queries vector so that we can release the lock while
     // we run the queries
@@ -518,7 +317,7 @@ void RealmCoordinator::run_async_queries()
     lock.unlock();
 
     for (auto& query : queries_to_run) {
-        query->run(obs.m_changes);
+        query->run(m_change_info);
     }
 
     // Reacquire the lock while updating the fields that are actually read on
@@ -530,6 +329,7 @@ void RealmCoordinator::run_async_queries()
         }
     }
 
+    m_change_info.tables.clear();
     clean_up_dead_queries();
 }
 
@@ -561,10 +361,11 @@ void RealmCoordinator::move_new_queries_to_main()
     m_new_queries.clear();
 }
 
-void RealmCoordinator::advance_helper_shared_group_to_latest(TransactLogObserver& obs)
+void RealmCoordinator::advance_helper_shared_group_to_latest()
 {
     if (m_new_queries.empty()) {
-        LangBindHelper::advance_read(*m_query_sg, *m_query_history, obs);
+        transaction::advance_and_observe_linkviews(*m_query_sg, *m_query_history,
+                                                   m_change_info);
         return;
     }
 
@@ -574,22 +375,30 @@ void RealmCoordinator::advance_helper_shared_group_to_latest(TransactLogObserver
         return lft->version() < rgt->version();
     });
 
+    TransactionChangeInfo new_change_info;
     // Import all newly added queries to our helper SG
     for (auto& query : m_new_queries) {
-        LangBindHelper::advance_read(*m_advancer_sg, *m_advancer_history, query->version());
+        transaction::advance_and_observe_linkviews(*m_advancer_sg, *m_advancer_history,
+                                                   new_change_info, query->version());
         query->attach_to(*m_advancer_sg);
+        query->add_required_change_info(new_change_info);
     }
 
     // Advance both SGs to the newest version
-    LangBindHelper::advance_read(*m_advancer_sg, *m_advancer_history);
-    LangBindHelper::advance_read(*m_query_sg, *m_query_history, obs,
-                                 m_advancer_sg->get_version_of_current_transaction());
+    // FIXME: this is now expensive, so need to think about impact on locking scheme
+    transaction::advance_and_observe_linkviews(*m_advancer_sg, *m_advancer_history,
+                                               new_change_info);
+    transaction::advance_and_observe_linkviews(*m_query_sg, *m_query_history,
+                                               m_change_info,
+                                               m_advancer_sg->get_version_of_current_transaction());
 
     // Transfer all new queries over to the main SG
     for (auto& query : m_new_queries) {
-        query->detatch();
+        query->detach();
         query->attach_to(*m_query_sg);
     }
+
+    std::move(begin(new_change_info.lists), end(new_change_info.lists), back_inserter(m_change_info.lists));
 
     move_new_queries_to_main();
     m_advancer_sg->end_read();
@@ -604,7 +413,6 @@ void RealmCoordinator::advance_to_ready(Realm& realm)
 
     {
         std::lock_guard<std::mutex> lock(m_query_mutex);
-
         SharedGroup::VersionID version;
         for (auto& query : m_queries) {
             version = query->version();
@@ -626,7 +434,7 @@ void RealmCoordinator::advance_to_ready(Realm& realm)
         transaction::advance(sg, history, realm.m_binding_context.get(), version);
 
         for (auto& query : m_queries) {
-            if (query->deliver(sg, m_async_error)) {
+            if (query->deliver(sg, m_async_error, m_change_info)) {
                 queries.push_back(query);
             }
         }
@@ -644,7 +452,7 @@ void RealmCoordinator::process_available_async(Realm& realm)
     {
         std::lock_guard<std::mutex> lock(m_query_mutex);
         for (auto& query : m_queries) {
-            if (query->deliver(sg, m_async_error)) {
+            if (query->deliver(sg, m_async_error, m_change_info)) {
                 queries.push_back(query);
             }
         }

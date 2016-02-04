@@ -40,6 +40,8 @@ namespace realm {
 
     namespace _impl {
         class AsyncQuery;
+        class CallbackCollection;
+        class ListNotificationHelper;
         class RealmCoordinator;
     }
 
@@ -122,6 +124,8 @@ namespace realm {
         // without making it public to everyone
         class Internal {
             friend class _impl::AsyncQuery;
+            friend class _impl::ListNotificationHelper;
+            friend class _impl::CallbackCollection;
             friend class _impl::RealmCoordinator;
 
             // AsyncQuery needs access to the SharedGroup to be able to call the
@@ -129,9 +133,9 @@ namespace realm {
             static SharedGroup& get_shared_group(Realm& realm) { return *realm.m_shared_group; }
             static ClientHistory& get_history(Realm& realm) { return *realm.m_history; }
 
-            // AsyncQuery needs to be able to access the owning coordinator to
-            // wake up the worker thread when a callback is added, and
-            // coordinators need to be able to get themselves from a Realm
+            // CallbackCollection needs to be able to access the owning
+            // coordinator to wake up the worker thread when a callback is
+            // added, and coordinators need to be able to get themselves from a Realm
             static _impl::RealmCoordinator& get_coordinator(Realm& realm) { return *realm.m_coordinator; }
         };
 

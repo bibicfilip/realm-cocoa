@@ -19,6 +19,7 @@
 #ifndef REALM_RESULTS_HPP
 #define REALM_RESULTS_HPP
 
+#include "collection_notifications.hpp"
 #include "shared_realm.hpp"
 
 #include <realm/table_view.hpp>
@@ -35,36 +36,11 @@ namespace _impl {
     class AsyncQuery;
 }
 
-// A token which keeps an asynchronous query alive
-struct AsyncQueryCancelationToken {
-    AsyncQueryCancelationToken() = default;
-    AsyncQueryCancelationToken(std::shared_ptr<_impl::AsyncQuery> query, size_t token);
-    ~AsyncQueryCancelationToken();
-
-    AsyncQueryCancelationToken(AsyncQueryCancelationToken&&);
-    AsyncQueryCancelationToken& operator=(AsyncQueryCancelationToken&&);
-
-    AsyncQueryCancelationToken(AsyncQueryCancelationToken const&) = delete;
-    AsyncQueryCancelationToken& operator=(AsyncQueryCancelationToken const&) = delete;
-
-private:
-    std::shared_ptr<_impl::AsyncQuery> m_query;
-    size_t m_token;
-};
-
-struct AsyncQueryChange {
-    size_t old_index;
-    size_t new_index;
-};
-
 struct SortOrder {
-    std::vector<size_t> columnIndices;
+    std::vector<size_t> column_indices;
     std::vector<bool> ascending;
 
-    explicit operator bool() const
-    {
-        return !columnIndices.empty();
-    }
+    explicit operator bool() const { return !column_indices.empty(); }
 };
 
 class Results {
@@ -180,10 +156,8 @@ public:
     // Create an async query from this Results
     // The query will be run on a background thread and delivered to the callback,
     // and then rerun after each commit (if needed) and redelivered if it changed
-    AsyncQueryCancelationToken async(std::function<void (std::exception_ptr)> target);
-
-    AsyncQueryCancelationToken async(std::vector<std::vector<size_t>> columns_to_watch,
-                                     std::function<void (std::vector<AsyncQueryChange>, std::exception_ptr)> target);
+    NotificationToken async(std::function<void (std::exception_ptr)> target);
+    NotificationToken add_notification_callback(CollectionChangeCallback cb);
 
     bool wants_background_updates() const { return m_wants_background_updates; }
 

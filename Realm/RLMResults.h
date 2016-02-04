@@ -24,11 +24,6 @@ RLM_ASSUME_NONNULL_BEGIN
 
 @class RLMObject, RLMRealm, RLMNotificationToken;
 
-@interface RLMObjectChange : NSObject
-@property (nonatomic) NSUInteger oldIndex;
-@property (nonatomic) NSUInteger newIndex;
-@end
-
 /**
  RLMResults is an auto-updating container type in Realm returned from object
  queries.

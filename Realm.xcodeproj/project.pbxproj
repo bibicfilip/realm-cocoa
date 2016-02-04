@@ -84,6 +84,17 @@
 		3FBEF67B1C63D66100F6935B /* RLMCollection.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6791C63D66100F6935B /* RLMCollection.mm */; };
 		3FBEF67C1C63D66400F6935B /* RLMCollection.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6791C63D66100F6935B /* RLMCollection.mm */; };
 		3FB972D91C40331D00232441 /* NotificationTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 3FB972D81C40331D00232441 /* NotificationTests.m */; };
+		3FBEF6671C63B8F700F6935B /* collection_notifications.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6651C63B8F700F6935B /* collection_notifications.cpp */; };
+		3FBEF6681C63B8F700F6935B /* collection_notifications.hpp in Headers */ = {isa = PBXBuildFile; fileRef = 3FBEF6661C63B8F700F6935B /* collection_notifications.hpp */; };
+		3FBEF66D1C63B90300F6935B /* callback_collection.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6691C63B90300F6935B /* callback_collection.cpp */; };
+		3FBEF66E1C63B90300F6935B /* callback_collection.hpp in Headers */ = {isa = PBXBuildFile; fileRef = 3FBEF66A1C63B90300F6935B /* callback_collection.hpp */; };
+		3FBEF66F1C63B90300F6935B /* list_notification_helper.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF66B1C63B90300F6935B /* list_notification_helper.cpp */; };
+		3FBEF6701C63B90300F6935B /* list_notification_helper.hpp in Headers */ = {isa = PBXBuildFile; fileRef = 3FBEF66C1C63B90300F6935B /* list_notification_helper.hpp */; };
+		3FBEF6711C63B90700F6935B /* collection_notifications.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6651C63B8F700F6935B /* collection_notifications.cpp */; };
+		3FBEF6721C63B90A00F6935B /* callback_collection.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6691C63B90300F6935B /* callback_collection.cpp */; };
+		3FBEF6731C63B90D00F6935B /* list_notification_helper.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF66B1C63B90300F6935B /* list_notification_helper.cpp */; };
+		3FBEF6751C63C6AE00F6935B /* RLMCollection.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6741C63C6AE00F6935B /* RLMCollection.mm */; };
+		3FBEF6761C63C6AE00F6935B /* RLMCollection.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3FBEF6741C63C6AE00F6935B /* RLMCollection.mm */; };
 		3FC767071BB9FE7500FE0AFC /* RLMMultiProcessTestCase.m in Sources */ = {isa = PBXBuildFile; fileRef = 027A4D2B1AB1012500AA46F9 /* RLMMultiProcessTestCase.m */; };
 		3FDCFEB619F6A8D3005E414A /* RLMSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E88C36FF19745E5500C9963D /* RLMSupport.swift */; };
 		3FDE338D19C39A87003B7DBA /* RLMSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E88C36FF19745E5500C9963D /* RLMSupport.swift */; };
@@ -487,6 +498,12 @@
 		3FBD05FB1B94E1C3004559CF /* index_set.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = index_set.hpp; path = ObjectStore/index_set.hpp; sourceTree = "<group>"; };
 		3FBEF6781C63D66100F6935B /* RLMCollection_Private.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = RLMCollection_Private.hpp; sourceTree = "<group>"; };
 		3FBEF6791C63D66100F6935B /* RLMCollection.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = RLMCollection.mm; sourceTree = "<group>"; };
+		3FBEF6651C63B8F700F6935B /* collection_notifications.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = collection_notifications.cpp; path = ObjectStore/collection_notifications.cpp; sourceTree = "<group>"; };
+		3FBEF6661C63B8F700F6935B /* collection_notifications.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = collection_notifications.hpp; path = ObjectStore/collection_notifications.hpp; sourceTree = "<group>"; };
+		3FBEF6691C63B90300F6935B /* callback_collection.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = callback_collection.cpp; path = ObjectStore/impl/callback_collection.cpp; sourceTree = "<group>"; };
+		3FBEF66A1C63B90300F6935B /* callback_collection.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = callback_collection.hpp; path = ObjectStore/impl/callback_collection.hpp; sourceTree = "<group>"; };
+		3FBEF66B1C63B90300F6935B /* list_notification_helper.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = list_notification_helper.cpp; path = ObjectStore/impl/list_notification_helper.cpp; sourceTree = "<group>"; };
+		3FBEF66C1C63B90300F6935B /* list_notification_helper.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = list_notification_helper.hpp; path = ObjectStore/impl/list_notification_helper.hpp; sourceTree = "<group>"; };
 		3FE556421B9A43E5002A1129 /* schema.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = schema.cpp; path = ObjectStore/schema.cpp; sourceTree = "<group>"; };
 		3FE556431B9A43E5002A1129 /* schema.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = schema.hpp; path = ObjectStore/schema.hpp; sourceTree = "<group>"; };
 		3FE79FF719BA6A5900780C9A /* RLMSwiftSupport.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RLMSwiftSupport.h; sourceTree = "<group>"; };
@@ -671,6 +688,8 @@
 			children = (
 				3FF0B0A31BA861F200E74157 /* impl */,
 				3F62BA9E1BA0AB9000A4CEB2 /* binding_context.hpp */,
+				3FBEF6651C63B8F700F6935B /* collection_notifications.cpp */,
+				3FBEF6661C63B8F700F6935B /* collection_notifications.hpp */,
 				3FBD05FA1B94E1C3004559CF /* index_set.cpp */,
 				3FBD05FB1B94E1C3004559CF /* index_set.hpp */,
 				3F90260F1C625C5D006AE98E /* list.cpp */,
@@ -719,7 +738,11 @@
 				3F0543F91C56FABE00AA5322 /* async_query.hpp */,
 				3F0543F51C56F78300AA5322 /* cached_realm.hpp */,
 				3F0543F31C56F76700AA5322 /* cached_realm_base.hpp */,
+				3FBEF6691C63B90300F6935B /* callback_collection.cpp */,
+				3FBEF66A1C63B90300F6935B /* callback_collection.hpp */,
 				3F0543F61C56F78300AA5322 /* external_commit_helper.hpp */,
+				3FBEF66B1C63B90300F6935B /* list_notification_helper.cpp */,
+				3FBEF66C1C63B90300F6935B /* list_notification_helper.hpp */,
 				3F0543EA1C56F71500AA5322 /* realm_coordinator.cpp */,
 				3F0543E91C56F71500AA5322 /* realm_coordinator.hpp */,
 				3F1F47891B97ABA300CD99A3 /* transact_log_handler.cpp */,
@@ -1044,10 +1067,13 @@
 				3F0543F01C56F74600AA5322 /* cached_realm.hpp in Headers */,
 				3F0543F71C56F78300AA5322 /* cached_realm.hpp in Headers */,
 				3F0543F41C56F76700AA5322 /* cached_realm_base.hpp in Headers */,
+				3FBEF66E1C63B90300F6935B /* callback_collection.hpp in Headers */,
+				3FBEF6681C63B8F700F6935B /* collection_notifications.hpp in Headers */,
 				5D659EA01BE04556006515A0 /* external_commit_helper.hpp in Headers */,
 				3F0543F81C56F78300AA5322 /* external_commit_helper.hpp in Headers */,
 				5D659EA11BE04556006515A0 /* index_set.hpp in Headers */,
 				3F9026121C625C5D006AE98E /* list.hpp in Headers */,
+				3FBEF6701C63B90300F6935B /* list_notification_helper.hpp in Headers */,
 				5D659EA21BE04556006515A0 /* object_schema.hpp in Headers */,
 				5D659EA31BE04556006515A0 /* object_store.hpp in Headers */,
 				5D659EA41BE04556006515A0 /* property.hpp in Headers */,
@@ -1631,9 +1657,12 @@
 			files = (
 				3F0543FC1C56FABE00AA5322 /* async_query.cpp in Sources */,
 				3F0543F11C56F74600AA5322 /* cached_realm.cpp in Sources */,
+				3FBEF66D1C63B90300F6935B /* callback_collection.cpp in Sources */,
+				3FBEF6671C63B8F700F6935B /* collection_notifications.cpp in Sources */,
 				5D659E811BE04556006515A0 /* external_commit_helper.cpp in Sources */,
 				5D659E821BE04556006515A0 /* index_set.cpp in Sources */,
 				3F9026111C625C5D006AE98E /* list.cpp in Sources */,
+				3FBEF66F1C63B90300F6935B /* list_notification_helper.cpp in Sources */,
 				5D659E831BE04556006515A0 /* object_schema.cpp in Sources */,
 				5D659E841BE04556006515A0 /* object_store.cpp in Sources */,
 				3F0543EC1C56F71500AA5322 /* realm_coordinator.cpp in Sources */,
@@ -1725,9 +1754,12 @@
 			files = (
 				3F0543FD1C56FAC200AA5322 /* async_query.cpp in Sources */,
 				3F0543F21C56F74A00AA5322 /* cached_realm.cpp in Sources */,
+				3FBEF6721C63B90A00F6935B /* callback_collection.cpp in Sources */,
+				3FBEF6711C63B90700F6935B /* collection_notifications.cpp in Sources */,
 				5DD7557F1BE056DE002800DA /* external_commit_helper.cpp in Sources */,
 				5DD755801BE056DE002800DA /* index_set.cpp in Sources */,
 				3F9026131C625C63006AE98E /* list.cpp in Sources */,
+				3FBEF6731C63B90D00F6935B /* list_notification_helper.cpp in Sources */,
 				5DD755811BE056DE002800DA /* object_schema.cpp in Sources */,
 				5DD755821BE056DE002800DA /* object_store.cpp in Sources */,
 				3F0543ED1C56F71900AA5322 /* realm_coordinator.cpp in Sources */,

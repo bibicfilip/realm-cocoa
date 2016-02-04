@@ -19,6 +19,7 @@
 #import "RLMResults_Private.h"
 
 #import "RLMArray_Private.hpp"
+#import "RLMCollection_Private.hpp"
 #import "RLMObjectSchema_Private.hpp"
 #import "RLMObjectStore.h"
 #import "RLMObject_Private.hpp"
@@ -30,7 +31,6 @@
 #import "RLMUtil.hpp"
 
 #import "results.hpp"
-#import "external_commit_helper.hpp"
 
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -43,26 +43,6 @@ using namespace realm;
 @implementation RLMNotificationToken
 @end
 #pragma clang diagnostic pop
-
-@interface RLMCancellationToken : RLMNotificationToken
-@end
-
-@implementation RLMCancellationToken {
-    realm::AsyncQueryCancelationToken _token;
-}
-- (instancetype)initWithToken:(realm::AsyncQueryCancelationToken)token {
-    self = [super init];
-    if (self) {
-        _token = std::move(token);
-    }
-    return self;
-}
-
-- (void)stop {
-    _token = {};
-}
-
-@end
 
 //
 // RLMResults implementation
@@ -475,7 +455,7 @@ static void RLMPrecondition(bool condition, NSString *format, ...) {
         column_paths.push_back(std::move(indexes));
     }
 
-    auto token = _results.async(move(column_paths), [self, block](std::vector<AsyncQueryChange> changes,
+    auto token = _results.add_notification_callback([self, block](CollectionChangeIndices const& changes,
                                                                   std::exception_ptr err) {
         if (err) {
             try {
@@ -491,15 +471,18 @@ static void RLMPrecondition(bool condition, NSString *format, ...) {
             block(self, nil, nil);
         }
         else {
-            auto to_nsnotfound = [](size_t i) {
-                return i + 1 == 0 ? NSNotFound : i;
-            };
             NSMutableArray *objcChanges = [NSMutableArray new];
-            for (auto change : changes) {
-                auto conv = [[RLMObjectChange alloc] init];
-                conv.oldIndex = to_nsnotfound(change.old_index);
-                conv.newIndex = to_nsnotfound(change.new_index);
-                [objcChanges addObject:conv];
+            for (auto ndx : changes.deletions.as_indexes()) {
+                [objcChanges addObject:[[RLMObjectChange alloc] initWithOld:ndx new:NSNotFound]];
+            }
+            for (auto ndx : changes.insertions.as_indexes()) {
+                [objcChanges addObject:[[RLMObjectChange alloc] initWithOld:NSNotFound new:ndx]];
+            }
+            for (auto ndx : changes.modifications.as_indexes()) {
+                [objcChanges addObject:[[RLMObjectChange alloc] initWithOld:ndx new:ndx]];
+            }
+            for (auto move : changes.moves) {
+                [objcChanges addObject:[[RLMObjectChange alloc] initWithOld:move.from new:move.to]];
             }
             block(self, objcChanges, nil);
         }
@@ -508,7 +491,4 @@ static void RLMPrecondition(bool condition, NSString *format, ...) {
     return [[RLMCancellationToken alloc] initWithToken:std::move(token)];
 }
 #pragma clang diagnostic pop
-@end
-
-@implementation RLMObjectChange
 @end

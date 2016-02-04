@@ -194,9 +194,10 @@ static NSNumber *NotFound;
     }
 
     __block bool first = true;
-    _token = [self.query addNotificationBlockWatchingKeypaths:@[] changes:^(RLMResults *results,
-                                                                            NSArray<RLMObjectChange *> *changes,
-                                                                            NSError *error) {
+    _token = [self.query addNotificationBlockWatchingKeypaths:@[]
+                                                      changes:^(RLMResults *results,
+                                                                NSArray<RLMObjectChange *> *changes,
+                                                                NSError *error) {
         XCTAssertNotNil(results);
         XCTAssertNil(error);
         _changes = changes;
@@ -214,6 +215,7 @@ static NSNumber *NotFound;
     }];
 
     [_token stop];
+    _token = nil;
 
     if (!expected) {
         XCTAssertNil(_changes);
@@ -236,6 +238,9 @@ static NSNumber *NotFound;
 }
 
 - (void)testDeleteMultiple {
+    [self expectChange:nil from:^(RLMRealm *realm) {
+        [realm deleteObjects:[IntObject objectsInRealm:realm where:@"intCol > 4"]];
+    }];
     [self expectChange:nil from:^(RLMRealm *realm) {
         [realm deleteObjects:[IntObject objectsInRealm:realm where:@"intCol > 4"]];
     }];

@@ -16,9 +16,10 @@
 //
 ////////////////////////////////////////////////////////////////////////////
 
-#include "transact_log_handler.hpp"
+#include "impl/transact_log_handler.hpp"
 
 #include "binding_context.hpp"
+#include "impl/realm_coordinator.hpp"
 
 #include <realm/commit_log.hpp>
 #include <realm/group_shared.hpp>
@@ -421,10 +422,229 @@ public:
     bool set_link(size_t col, size_t row, size_t, size_t) { return mark_dirty(row, col); }
     bool set_null(size_t col, size_t row) { return mark_dirty(row, col); }
     bool nullify_link(size_t col, size_t row, size_t) { return mark_dirty(row, col); }
-    bool set_int_unique(size_t col, size_t row, int_fast64_t) { return mark_dirty(row, col); }
-    bool set_string_unique(size_t col, size_t row, StringData) { return mark_dirty(row, col); }
     bool insert_substring(size_t col, size_t row, size_t, StringData) { return mark_dirty(row, col); }
     bool erase_substring(size_t col, size_t row, size_t, size_t) { return mark_dirty(row, col); }
+    bool set_int_unique(size_t col, size_t row, int_fast64_t) { return mark_dirty(row, col); }
+    bool set_string_unique(size_t col, size_t row, StringData) { return mark_dirty(row, col); }
+};
+
+// Extends TransactLogValidator to track changes made to LinkViews
+class LinkViewObserver : public TransactLogValidator {
+    std::vector<_impl::ListChangeInfo>& m_observered_linkviews;
+    _impl::ListChangeInfo* m_active = nullptr;
+    std::vector<_impl::TableChangeInfo>& m_tables;
+
+    _impl::TableChangeInfo& get_change(size_t i)
+    {
+        if (m_tables.size() <= i) {
+            m_tables.resize(std::max(m_tables.size() * 2, i + 1));
+        }
+        return m_tables[i];
+    }
+
+    bool mark_dirty(size_t row, __unused size_t col)
+    {
+        auto& table = get_change(current_table());
+        auto it = table.moves.find(row);
+        if (it != end(table.moves)) {
+            row = it->second;
+        }
+        table.changes.add(row);
+
+        return true;
+    }
+
+public:
+    LinkViewObserver(_impl::TransactionChangeInfo& info)
+    : m_observered_linkviews(info.lists), m_tables(info.tables) { }
+
+    bool select_link_list(size_t col, size_t row, size_t)
+    {
+        m_active = nullptr;
+        for (auto& o : m_observered_linkviews) {
+            if (o.table_ndx == current_table() && o.row_ndx == row && o.col_ndx == col) {
+                m_active = &o;
+                break;
+            }
+        }
+        return true;
+    }
+
+    bool link_list_set(size_t index, size_t)
+    {
+        if (!m_active)
+            return true;
+
+        if (!m_active->inserts.contains(index))
+            m_active->changes.add(index);
+        // If this row was previously moved, unmark it as a move
+        m_active->moves.erase(remove_if(begin(m_active->moves), end(m_active->moves),
+                                        [&](auto move) { return move.second == index; }),
+                              end(m_active->moves));
+        return true;
+    }
+
+    bool link_list_insert(size_t index, size_t)
+    {
+        if (!m_active)
+            return true;
+
+        m_active->changes.shift_for_insert_at(index);
+        m_active->inserts.insert_at(index);
+
+        for (auto& move : m_active->moves) {
+            if (move.second >= index)
+                ++move.second;
+        }
+
+        return true;
+    }
+
+    bool link_list_erase(size_t index)
+    {
+        if (!m_active)
+            return true;
+
+        m_active->changes.erase_at(index);
+        bool is_new = m_active->inserts.erase_at(index);
+        // this is probably wrong for mixed insert/delete
+        if (!is_new)
+            m_active->deletes.add_shifted(m_active->inserts.unshift(index));
+
+        for (size_t i = 0; i < m_active->moves.size(); ++i) {
+            auto& move = m_active->moves[i];
+            if (move.second == index) {
+                m_active->moves.erase(m_active->moves.begin() + i);
+                --i;
+            }
+            else if (move.second > index)
+                --move.second;
+        }
+
+        return true;
+    }
+
+    bool link_list_nullify(size_t index)
+    {
+        return link_list_erase(index);
+    }
+
+    bool link_list_swap(size_t index1, size_t index2)
+    {
+        link_list_set(index1, 0);
+        link_list_set(index2, 0);
+        return true;
+    }
+
+    bool link_list_clear(size_t old_size)
+    {
+        if (!m_active)
+            return true;
+
+        for (auto range : m_active->deletes)
+            old_size += range.second - range.first;
+        for (auto range : m_active->inserts)
+            old_size -= range.second - range.first;
+
+        m_active->changes.clear();
+        m_active->inserts.clear();
+        m_active->moves.clear();
+        m_active->deletes.set(old_size);
+
+        return true;
+    }
+
+    bool link_list_move(size_t from, size_t to)
+    {
+        if (!m_active)
+            return true;
+        REALM_ASSERT(from != to);
+
+        bool updated_existing_move = false;
+        for (auto& move : m_active->moves) {
+            if (move.second != from) {
+                // Shift other moves if this row is moving from one side of them
+                // to the other
+                if (move.second >= to && move.second < from)
+                    ++move.second;
+                else if (move.second < to && move.second > from)
+                    --move.second;
+                continue;
+            }
+            REALM_ASSERT(!updated_existing_move);
+
+            // Collapse A -> B, B -> C into a single A -> C move
+            move.second = to;
+            m_active->changes.erase_at(from);
+            m_active->inserts.erase_at(from);
+
+            m_active->changes.shift_for_insert_at(to);
+            m_active->inserts.insert_at(to);
+            updated_existing_move = true;
+        }
+        if (updated_existing_move)
+            return true;
+
+
+        auto shifted_from = m_active->inserts.unshift(from);
+        shifted_from = m_active->deletes.add_shifted(shifted_from);
+
+        // Don't record it as a move if the source row was newly inserted or
+        // was previously changed
+        if (!m_active->changes.contains(from) && !m_active->inserts.contains(from)) {
+            m_active->moves.push_back({shifted_from, to});
+        }
+
+        m_active->changes.erase_at(from);
+        m_active->inserts.erase_at(from);
+
+        m_active->changes.shift_for_insert_at(to);
+        m_active->inserts.insert_at(to);
+
+        return true;
+    }
+
+    bool erase_rows(size_t row_ndx, size_t, size_t prior_num_rows, bool unordered)
+    {
+        REALM_ASSERT(unordered);
+
+        auto& table = get_change(current_table());
+        auto last_row_ndx = prior_num_rows - 1;
+        auto it = table.moves.find(last_row_ndx);
+        if (it != end(table.moves)) {
+            last_row_ndx = it->second;
+        }
+        table.moves[row_ndx] = last_row_ndx;
+        table.deletes.add_shifted(row_ndx);
+
+        // FIXME: LV being deleted
+
+        return true;
+    }
+
+    bool clear_table()
+    {
+        // FIXME
+        return true;
+    }
+
+    // Things that just mark the field as modified
+    bool set_int(size_t col, size_t row, int_fast64_t) { return mark_dirty(row, col); }
+    bool set_bool(size_t col, size_t row, bool) { return mark_dirty(row, col); }
+    bool set_float(size_t col, size_t row, float) { return mark_dirty(row, col); }
+    bool set_double(size_t col, size_t row, double) { return mark_dirty(row, col); }
+    bool set_string(size_t col, size_t row, StringData) { return mark_dirty(row, col); }
+    bool set_binary(size_t col, size_t row, BinaryData) { return mark_dirty(row, col); }
+    bool set_date_time(size_t col, size_t row, DateTime) { return mark_dirty(row, col); }
+    bool set_table(size_t col, size_t row) { return mark_dirty(row, col); }
+    bool set_mixed(size_t col, size_t row, const Mixed&) { return mark_dirty(row, col); }
+    bool set_link(size_t col, size_t row, size_t, size_t) { return mark_dirty(row, col); }
+    bool set_null(size_t col, size_t row) { return mark_dirty(row, col); }
+    bool nullify_link(size_t col, size_t row, size_t) { return mark_dirty(row, col); }
+    bool insert_substring(size_t col, size_t row, size_t, StringData) { return mark_dirty(row, col); }
+    bool erase_substring(size_t col, size_t row, size_t, size_t) { return mark_dirty(row, col); }
+    bool set_int_unique(size_t col, size_t row, int_fast64_t) { return mark_dirty(row, col); }
+    bool set_string_unique(size_t col, size_t row, StringData) { return mark_dirty(row, col); }
 };
 } // anonymous namespace
 
@@ -459,6 +679,13 @@ void cancel(SharedGroup& sg, ClientHistory& history, BindingContext* context)
     TransactLogObserver(context, sg, [&](auto&&... args) {
         LangBindHelper::rollback_and_continue_as_read(sg, history, std::move(args)...);
     }, false);
+}
+
+void advance_and_observe_linkviews(SharedGroup& sg, ClientHistory& history,
+                                   TransactionChangeInfo& info,
+                                   SharedGroup::VersionID version)
+{
+    LangBindHelper::advance_read(sg, history, LinkViewObserver(info), version);
 }
 
 } // namespace transaction

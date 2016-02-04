@@ -1,0 +1,12 @@
+rename callbackcollection
+finish extracting code to cc
+multiple transaction versions
+  listview
+  results not picked up
+  results picked up during processing
+listview-based queries (lv backed Results?)
+testing
+rest of the examples
+better api
+perf testing + optim
+docs
