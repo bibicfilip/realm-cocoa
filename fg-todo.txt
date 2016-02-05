@@ -6,6 +6,10 @@ multiple transaction versions
   results picked up during processing
 listview-based queries (lv backed Results?)
 testing
+  make ECH mockable
+  make the tests and fuzzer single-threaded
+  write lots of tests
+  fuzz things
 rest of the examples
 better api
 perf testing + optim
