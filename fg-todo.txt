@@ -1,5 +1,3 @@
-rename callbackcollection
-finish extracting code to cc
 multiple transaction versions
   listview
   results not picked up
