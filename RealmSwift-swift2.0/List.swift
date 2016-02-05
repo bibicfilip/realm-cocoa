@@ -152,6 +152,10 @@ public final class List<T: Object>: ListBase {
         return _rlmArray.valueForKey(key)
     }
 
+    public override func valueForKeyPath(keyPath: String) -> AnyObject? {
+        return _rlmArray.valueForKeyPath(keyPath)
+    }
+
     /**
     Invokes `setValue(_:forKey:)` on each of the collection's objects using the specified value and key.
 

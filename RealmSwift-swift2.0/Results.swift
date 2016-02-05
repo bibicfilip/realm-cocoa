@@ -191,6 +191,10 @@ public final class Results<T: Object>: ResultsBase {
         return rlmResults.valueForKey(key)
     }
 
+    public override func valueForKeyPath(keyPath: String) -> AnyObject? {
+        return rlmResults.valueForKeyPath(keyPath)
+    }
+
     /**
     Invokes `setValue(_:forKey:)` on each of the collection's objects using the specified value and key.
 
